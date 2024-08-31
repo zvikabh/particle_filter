@@ -1,13 +1,19 @@
 import dataclasses
+import math
 import random
 import time
 
 import matplotlib.pyplot as plt
 
+# State and observation parameters.
 SCREEN_X = 500
 SCREEN_Y = 500
 MAX_V = 5
 OBSERVATION_NOISE = 10
+NUM_PLAYERS = 4
+
+# Particle filter parameters.
+NUM_PARTICLES = 100
 
 
 @dataclasses.dataclass
@@ -24,10 +30,10 @@ class Location:
   y: int
 
 
-def choose_player_locations(num_players: int) -> list[Location]:
+def choose_player_locations() -> list[Location]:
   """Select random initial locations for each of the players."""
   player_locations = []
-  for i in range(num_players):
+  for i in range(NUM_PLAYERS):
     player_locations.append(Location(x=random.randint(0, SCREEN_X), y=random.randint(0, SCREEN_Y)))
   return player_locations
 
@@ -75,10 +81,23 @@ def get_observations(state: State) -> Location:
   return loc
 
 
+def calc_weight(particle_state: State, obs: Location) -> float:
+  x1 = particle_state.x
+  x2 = obs.x
+  y1 = particle_state.y
+  y2 = obs.y
+  distance = math.sqrt((x1-x2)**2 + (y1-y2)**2)
+  weight = 1/(1 + 1/10*distance)
+  return weight
+
+
 def main():
-  player_locations = choose_player_locations(num_players=4)
+  player_locations = choose_player_locations()
   state = choose_initial_state()
   obs = get_observations(state)
+  particles = [choose_initial_state() for i in range(NUM_PARTICLES)]
+  particle_weights = [1 for i in range(NUM_PARTICLES)]
+  particle_player_locations = [choose_player_locations() for i in range(NUM_PARTICLES)]
 
   plt.ion()
   fig, ax = plt.subplots()
@@ -86,6 +105,7 @@ def main():
   ax.plot([loc.x for loc in player_locations], [loc.y for loc in player_locations], 'o', color='red')
   state_plot, = ax.plot([state.x], [state.y], '.', color='blue')
   obs_plot, = ax.plot([obs.x], [obs.y], 'o', color='green')
+  particle_plot, = ax.plot([particle.x for particle in particles], [particle.y for particle in particles], '.', color='black')
   fig.canvas.draw()
   fig.canvas.flush_events()
 
@@ -97,6 +117,29 @@ def main():
     obs_plot.set_ydata([obs.y])
     state_plot.set_xdata([state.x])
     state_plot.set_ydata([state.y])
+
+    # Update the particles
+    for i in range(NUM_PARTICLES):
+      update_state(particles[i], particle_player_locations[i])
+      particle_weights[i] = calc_weight(particles[i], obs)
+
+    # Find the best particle
+    max = 0
+    max_index = None
+    for i in range(NUM_PARTICLES):
+      if particle_weights[i] > max:
+        max = particle_weights[i]
+        max_index = i
+    best_particle = particles[max_index]
+
+    # Kill particles more than 100 pixels from the observation, and replace them with particles based on the best one.
+    for i in range(NUM_PARTICLES):
+      if particle_weights[i] < 0.1:
+        particles[i].x = best_particle.x
+        particles[i].y = best_particle.y
+
+    particle_plot.set_xdata([particle.x for particle in particles])
+    particle_plot.set_ydata([particle.y for particle in particles])
     fig.canvas.draw()
     fig.canvas.flush_events()
     time.sleep(0.01)
